@@ -60,6 +60,13 @@ export interface RunMetrics {
   // Curves
   speedCurve: { t: number; v: number }[];
   accelCurve: { t: number; a: number }[];
+  // Phase-level averages for F-v profile computation
+  perStepSpeeds_ms: number[];
+  perStepTimes: number[];
+  perStepGCTs: number[];
+  perStepAirTimes: number[];
+  // Detected run type
+  detectedRunType: 'fly' | 'blocks';
 }
 
 export function getAngle(a: Keypoint, b: Keypoint, c: Keypoint): number {
@@ -267,6 +274,16 @@ export function computeRunMetrics(
     steps,
     speedCurve,
     accelCurve,
+    perStepSpeeds_ms: perStepSpeeds,
+    perStepTimes: steps.map(s => s.groundContactTime + s.airTime),
+    perStepGCTs: steps.map(s => s.groundContactTime),
+    perStepAirTimes: steps.map(s => s.airTime),
+    detectedRunType: (() => {
+      if (perStepSpeeds.length < 3) return 'fly';
+      const first = perStepSpeeds.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+      const last = perStepSpeeds.slice(-3).reduce((a, b) => a + b, 0) / 3;
+      return (last - first) / Math.max(first, 0.1) < 0.15 ? 'fly' : 'blocks';
+    })(),
   };
 }
 
