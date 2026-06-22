@@ -2,9 +2,11 @@
 import { useState } from 'react';
 import type { RunMetrics } from '../lib/biomechanics';
 import { SPORT_PRESETS, SPORT_LABELS, flagMetric, type SportType } from '../lib/athleteProfiles';
+import type { FVProfile, WeyandMetrics } from '../lib/forceVelocity';
+import type { RunType } from '../lib/runTypes';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, BarChart, Bar,
+  ResponsiveContainer, ReferenceLine, BarChart, Bar, ScatterChart, Scatter,
 } from 'recharts';
 
 interface Props {
@@ -12,14 +14,17 @@ interface Props {
   kinogramUrls: string[];
   sport?: SportType;
   weightKg?: number;
+  runType?: RunType;
+  fvProfile?: FVProfile | null;
+  weyandMetrics?: WeyandMetrics | null;
 }
 
 const FLAG_COLOR = { good: '#22c55e', low: '#f59e0b', high: '#ef4444' };
 const FLAG_LABEL = { good: '✓', low: '▼ Low', high: '▲ High' };
 
-type Tab = 'summary' | 'steps' | 'charts' | 'kinogram';
+type Tab = 'summary' | 'steps' | 'charts' | 'analysis' | 'kinogram';
 
-export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom', weightKg = 75 }: Props) {
+export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom', weightKg = 75, runType, fvProfile, weyandMetrics }: Props) {
   const preset = SPORT_PRESETS[sport];
   const [tab, setTab] = useState<Tab>('summary');
 
@@ -82,7 +87,7 @@ export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom'
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', overflowX: 'auto' }}>
-        {(['summary', 'charts', 'steps', 'kinogram'] as Tab[]).map(t => (
+        {(['summary', 'charts', 'steps', 'analysis', 'kinogram'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             background: tab === t ? '#f59e0b' : '#141414',
             color: tab === t ? '#000' : '#888',
@@ -91,7 +96,7 @@ export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom'
             fontSize: '0.78rem', whiteSpace: 'nowrap', flexShrink: 0,
             textTransform: 'capitalize',
           }}>
-            {t === 'summary' ? '📊 Summary' : t === 'charts' ? '📈 Charts' : t === 'steps' ? '👟 Steps' : '🎞 Kinogram'}
+            {t === 'summary' ? '📊 Summary' : t === 'charts' ? '📈 Charts' : t === 'steps' ? '👟 Steps' : t === 'analysis' ? '⚡ F-v Profile' : '🎞 Kinogram'}
           </button>
         ))}
       </div>
@@ -100,6 +105,7 @@ export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom'
       {tab === 'summary' && <SummaryTab m={m} />}
       {tab === 'charts' && <ChartsTab m={m} />}
       {tab === 'steps' && <StepsTab m={m} />}
+      {tab === 'analysis' && <AnalysisTab fv={fvProfile ?? null} weyand={weyandMetrics ?? null} runType={runType} />}
       {tab === 'kinogram' && <KinogramTab urls={kinogramUrls} steps={m.steps} />}
     </div>
   );
@@ -330,6 +336,104 @@ function StepsTab({ m }: { m: RunMetrics }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AnalysisTab({ fv, weyand, runType }: { fv: FVProfile | null; weyand: WeyandMetrics | null; runType?: RunType }) {
+  const profileColor = fv?.profile === 'force-oriented' ? '#ef4444' : fv?.profile === 'velocity-oriented' ? '#3b82f6' : '#22c55e';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+      {/* F-v Profile */}
+      {fv ? (
+        <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: '12px', padding: '1rem' }}>
+          <p style={{ margin: '0 0 0.25rem', fontSize: '0.7rem', color: '#888', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Force-Velocity Profile <span style={{ color: '#555', fontWeight: 400 }}>(Morin & Samozino 2012)</span>
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.6rem', margin: '0.75rem 0' }}>
+            <MiniStat label="F0 (max force)" value={`${fv.F0} N/kg`} color="#ef4444" tip="Theoretical max force at zero speed" />
+            <MiniStat label="V0 (max velocity)" value={`${fv.V0} m/s`} color="#3b82f6" tip="Theoretical max speed at zero force" />
+            <MiniStat label="Pmax" value={`${fv.Pmax} W/kg`} color="#f59e0b" tip="Peak mechanical power output" />
+            <MiniStat label="RFmax" value={`${fv.RFmax}%`} color="#a855f7" tip="Peak ratio of horizontal to total force" />
+            <MiniStat label="R²" value={`${fv.r2}`} color="#22c55e" tip="Curve fit quality (1.0 = perfect)" />
+            <MiniStat label="FV Imbalance" value={`${fv.FVimbalance > 0 ? '+' : ''}${fv.FVimbalance}%`}
+              color={Math.abs(fv.FVimbalance) < 25 ? '#22c55e' : '#ef4444'}
+              tip="How far from optimal profile" />
+          </div>
+
+          {/* Profile badge */}
+          <div style={{ background: `${profileColor}18`, border: `1px solid ${profileColor}44`, borderRadius: '8px', padding: '0.75rem', marginBottom: '0.75rem' }}>
+            <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', fontWeight: 800, color: profileColor, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {fv.profile === 'force-oriented' ? '⚡ Force Oriented' : fv.profile === 'velocity-oriented' ? '💨 Velocity Oriented' : '✓ Balanced Profile'}
+            </p>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#888', lineHeight: 1.4 }}>{fv.recommendation}</p>
+          </div>
+
+          {/* F-v scatter plot */}
+          {fv.points.length > 2 && (
+            <>
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.72rem', color: '#555' }}>Force vs. Velocity (each point = one step)</p>
+              <ResponsiveContainer width="100%" height={160}>
+                <ScatterChart>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e1e1e" />
+                  <XAxis dataKey="velocity" name="Velocity" unit=" m/s" tick={{ fill: '#555', fontSize: 10 }} label={{ value: 'Velocity (m/s)', position: 'insideBottom', fill: '#555', fontSize: 10 }} />
+                  <YAxis dataKey="force" name="Force" unit=" N/kg" tick={{ fill: '#555', fontSize: 10 }} />
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: '#141414', border: '1px solid #2a2a2a', color: '#f0f0f0', fontSize: 11 }} />
+                  <Scatter data={fv.points} fill="#f59e0b" />
+                </ScatterChart>
+              </ResponsiveContainer>
+            </>
+          )}
+        </div>
+      ) : (
+        <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: '12px', padding: '1.5rem', textAlign: 'center' }}>
+          <p style={{ color: '#555', fontSize: '0.85rem', margin: 0 }}>
+            {runType === 'fly' ? 'F-v profile requires a block or standing start run.' : 'Not enough data for F-v profile. Try a longer run or add split times.'}
+          </p>
+        </div>
+      )}
+
+      {/* Weyand Model */}
+      {weyand ? (
+        <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: '12px', padding: '1rem' }}>
+          <p style={{ margin: '0 0 0.75rem', fontSize: '0.7rem', color: '#888', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Top Speed Mechanics <span style={{ color: '#555', fontWeight: 400 }}>(Weyand et al. 2000)</span>
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.6rem', marginBottom: '0.75rem' }}>
+            <MiniStat label="Peak GRF" value={`${weyand.Fmax_BW}× BW`} color="#ef4444" tip="Peak ground reaction force as multiple of body weight" />
+            <MiniStat label="Peak GRF" value={`${weyand.Fmax_lbs} lbs`} color="#f97316" tip="Peak ground reaction force in pounds" />
+            <MiniStat label="Mech. Effectiveness" value={`${weyand.contactMechEff}%`} color="#a855f7" tip="How effectively force is applied during contact" />
+            <MiniStat label="Speed Ceiling" value={`${weyand.topSpeedLimit} mph`} color="#22c55e" tip="Theoretical max speed based on your force output" />
+          </div>
+          <div style={{
+            background: weyand.limitingFactor === 'balanced' ? '#22c55e11' : '#f59e0b11',
+            border: `1px solid ${weyand.limitingFactor === 'balanced' ? '#22c55e44' : '#f59e0b44'}`,
+            borderRadius: '8px', padding: '0.75rem',
+          }}>
+            <p style={{ margin: '0 0 0.25rem', fontSize: '0.72rem', fontWeight: 700, color: weyand.limitingFactor === 'balanced' ? '#22c55e' : '#f59e0b', textTransform: 'uppercase' }}>
+              Limiting Factor: {weyand.limitingFactor === 'contact-time' ? 'Contact Time' : weyand.limitingFactor === 'force' ? 'Force Production' : 'Balanced'}
+            </p>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#888', lineHeight: 1.4 }}>{weyand.insight}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {!fv && !weyand && (
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#555' }}>
+          <p>Run a block or standing start to unlock advanced F-v and biomechanical profiling.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, color, tip }: { label: string; value: string; color: string; tip?: string }) {
+  return (
+    <div style={{ background: '#1a1a1a', border: '1px solid #252525', borderRadius: '8px', padding: '0.6rem 0.75rem' }} title={tip}>
+      <p style={{ margin: 0, fontSize: '0.6rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</p>
+      <p style={{ margin: '0.2rem 0 0', fontSize: '1.1rem', fontWeight: 800, color }}>{value}</p>
     </div>
   );
 }

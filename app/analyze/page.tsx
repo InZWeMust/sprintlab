@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import type { RunMetrics } from '../../lib/biomechanics';
 import { SPORT_LABELS, SPORT_PRESETS, lbsToKg, kgToLbs, type SportType } from '../../lib/athleteProfiles';
+import { RUN_TYPE_CONFIG, type RunType } from '../../lib/runTypes';
+import type { SplitTime } from '../../lib/forceVelocity';
 
 const ResultsView = dynamic(() => import('../../components/ResultsView'), { ssr: false });
 
@@ -24,12 +26,20 @@ export default function AnalyzePage() {
 
   // Config inputs
   const [sport, setSport] = useState<SportType>('100m');
+  const [runType, setRunType] = useState<RunType>('blocks');
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs');
   const [weightLbs, setWeightLbs] = useState(165);
   const [weightKg, setWeightKg] = useState(75);
   const [runDistanceM, setRunDistanceM] = useState(20);
   const [pixelsPerMeter, setPixelsPerMeter] = useState(120);
   const [cameraAngle, setCameraAngle] = useState<'side' | 'slight-angle' | 'front-back'>('side');
+  // Split times for F-v profile
+  const [useSplits, setUseSplits] = useState(false);
+  const [splits, setSplits] = useState<SplitTime[]>([
+    { distance: 10, time: 0 },
+    { distance: 20, time: 0 },
+    { distance: 30, time: 0 },
+  ]);
 
   // Analysis state
   const [progress, setProgress] = useState(0);
@@ -37,6 +47,9 @@ export default function AnalyzePage() {
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);
   const [kinogramUrls, setKinogramUrls] = useState<string[]>([]);
   const [usedSport, setUsedSport] = useState<SportType>('100m');
+  const [usedRunType, setUsedRunType] = useState<RunType>('blocks');
+  const [fvProfile, setFvProfile] = useState<import('../../lib/forceVelocity').FVProfile | null>(null);
+  const [weyandMetrics, setWeyandMetrics] = useState<import('../../lib/forceVelocity').WeyandMetrics | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -117,6 +130,7 @@ export default function AnalyzePage() {
     setProgress(0);
     setProgressMsg('Loading AI pose model...');
     setUsedSport(sport);
+    setUsedRunType(runType);
 
     try {
       const { loadDetector, detectPosesFromVideo, extractKinogramFrames } = await import('../../lib/poseDetection');
@@ -137,6 +151,31 @@ export default function AnalyzePage() {
       const { computeRunMetrics } = await import('../../lib/biomechanics');
       const result = computeRunMetrics(poses, fps, bodyWeightKg, pixelsPerMeter, runDistanceM);
       setMetrics(result);
+
+      // Compute F-v profile and Weyand metrics
+      const { computeFVProfile, computeFVProfileFromSplits, computeWeyandMetrics } = await import('../../lib/forceVelocity');
+      const { RUN_TYPE_CONFIG: rtCfg } = await import('../../lib/runTypes');
+      const showFv = rtCfg[runType].showFvProfile;
+      const showWeyand = rtCfg[runType].showWeyand;
+
+      if (showFv) {
+        const activeSplits = useSplits ? splits.filter(s => s.time > 0) : [];
+        const fv = activeSplits.length >= 3
+          ? computeFVProfileFromSplits(activeSplits, bodyWeightKg, result.perStepGCTs, result.perStepAirTimes)
+          : computeFVProfile(result.perStepSpeeds_ms, result.perStepTimes, bodyWeightKg, result.perStepGCTs, result.perStepAirTimes);
+        setFvProfile(fv);
+      } else {
+        setFvProfile(null);
+      }
+
+      if (showWeyand) {
+        const avgGCT = (result.avgGCT_Right + result.avgGCT_Left) / 2;
+        const avgAir = (result.avgAirRight + result.avgAirLeft) / 2;
+        const w = computeWeyandMetrics(avgGCT, avgAir, result.maxSpeed_mph / 2.23694, bodyWeightKg);
+        setWeyandMetrics(w);
+      } else {
+        setWeyandMetrics(null);
+      }
 
       setProgressMsg('Generating kinogram...');
       const keyFrames = result.steps.slice(0, 7).map(s => s.frameIndex);
@@ -338,6 +377,65 @@ export default function AnalyzePage() {
                 )}
               </div>
 
+              {/* Run Type */}
+              <div>
+                <label style={labelStyle}>Run Type</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                  {(Object.keys(RUN_TYPE_CONFIG) as RunType[]).map(rt => {
+                    const cfg = RUN_TYPE_CONFIG[rt];
+                    return (
+                      <button key={rt} onClick={() => setRunType(rt)} style={{
+                        background: runType === rt ? '#f59e0b22' : '#141414',
+                        border: `1px solid ${runType === rt ? '#f59e0b' : '#2a2a2a'}`,
+                        borderRadius: '8px', padding: '0.6rem 0.5rem',
+                        color: runType === rt ? '#f59e0b' : '#666',
+                        fontWeight: runType === rt ? 700 : 400, fontSize: '0.78rem',
+                        cursor: 'pointer', textAlign: 'left',
+                      }}>
+                        <span style={{ fontSize: '1rem' }}>{cfg.icon}</span> {cfg.label}
+                        <br />
+                        <span style={{ fontSize: '0.65rem', opacity: 0.6 }}>{cfg.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Split times (optional, for F-v profile) */}
+              {(runType === 'blocks' || runType === 'standing') && (
+                <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: '10px', padding: '0.9rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                    <label style={{ ...labelStyle, marginBottom: 0 }}>
+                      Split Times <span style={{ color: '#555', fontWeight: 400 }}>(optional — unlocks F-v profile)</span>
+                    </label>
+                    <button onClick={() => setUseSplits(v => !v)} style={{
+                      background: useSplits ? '#f59e0b' : '#2a2a2a',
+                      color: useSplits ? '#000' : '#666',
+                      border: 'none', borderRadius: '6px', padding: '0.25rem 0.75rem',
+                      fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer',
+                    }}>{useSplits ? 'ON' : 'OFF'}</button>
+                  </div>
+                  {useSplits && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {splits.map((s, i) => (
+                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '0.5rem', alignItems: 'center' }}>
+                          <span style={{ color: '#666', fontSize: '0.78rem' }}>{s.distance}m</span>
+                          <input
+                            type="number" step="0.01" placeholder="seconds"
+                            value={s.time || ''}
+                            onChange={e => setSplits(prev => prev.map((x, j) => j === i ? { ...x, time: Number(e.target.value) } : x))}
+                            style={{ ...inputStyle, padding: '0.5rem 0.75rem', fontSize: '0.9rem' }}
+                          />
+                        </div>
+                      ))}
+                      <p style={{ color: '#444', fontSize: '0.7rem', margin: '0.25rem 0 0' }}>
+                        Enter stopwatch times from start to each marker. Leave blank to skip that split.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Camera angle — affects step detection accuracy */}
               <div>
                 <label style={labelStyle}>Camera Angle</label>
@@ -453,7 +551,7 @@ export default function AnalyzePage() {
         {/* ── RESULTS ── */}
         {step === 'results' && metrics && (
           <Suspense fallback={<div style={{ color: '#888', textAlign: 'center', padding: '2rem' }}>Loading...</div>}>
-            <ResultsView metrics={metrics} kinogramUrls={kinogramUrls} sport={usedSport} weightKg={bodyWeightKg} />
+            <ResultsView metrics={metrics} kinogramUrls={kinogramUrls} sport={usedSport} weightKg={bodyWeightKg} runType={usedRunType} fvProfile={fvProfile} weyandMetrics={weyandMetrics} />
           </Suspense>
         )}
       </div>
