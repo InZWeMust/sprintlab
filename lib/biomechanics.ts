@@ -116,8 +116,6 @@ export function computeRunMetrics(
   const rightAnkleY = poses.map(p => p.keypoints.find(k => k.name === 'right_ankle')?.y ?? 0);
   const leftHipY    = poses.map(p => p.keypoints.find(k => k.name === 'left_hip')?.y    ?? 0);
   const rightHipY   = poses.map(p => p.keypoints.find(k => k.name === 'right_hip')?.y   ?? 0);
-  const leftHipX    = poses.map(p => p.keypoints.find(k => k.name === 'left_hip')?.x    ?? 0);
-  const rightHipX   = poses.map(p => p.keypoints.find(k => k.name === 'right_hip')?.x   ?? 0);
 
   const contacts = detectContacts(leftAnkleY, rightAnkleY, fps);
 
@@ -127,90 +125,73 @@ export function computeRunMetrics(
   const avgStepFreq   = totalSteps / runTime;           // avg step freq (Hz)
   const avgSpeed_ms   = runDistanceM / runTime;         // exact avg speed (m/s)
 
-  // ── Relative speed shape from hip X movement ─────────────────────────────
-  // Hip X in pixels tracks the athlete moving across the frame.
-  // We smooth it with a window, get velocity per frame, then normalize to the
-  // known real average speed. This gives us per-step speed variation without
-  // depending on pixel-to-meter calibration for the absolute value.
-  const hipX = leftHipX.map((l, i) => {
-    const r = rightHipX[i];
-    return (l > 0 && r > 0) ? (l + r) / 2 : (l || r);
+  // ── Per-step speed from stride timing (stable, no pixel noise) ───────────
+  // Physics: v = distance / time. For each step, relative speed ∝ 1/strideTime.
+  // We anchor to the known real average: instantSpeed_i = avgSpeed × (avgStrideTime / strideTime_i)
+  // This correctly shows: early steps (long GCT, little air) = slower,
+  // later steps (short GCT, more air) = faster. No pixel tracking needed.
+
+  // ── Pass 1: compute raw stride times for all contacts ────────────────────
+  const rawStrideTimes: number[] = contacts.map((c, i) => {
+    const next = contacts[i + 1];
+    const gct = clamp(c.duration / fps, GCT_MIN, GCT_MAX);
+    const toeOff = c.start + c.duration;
+    const air = next ? clamp((next.start - toeOff) / fps, AIR_MIN, AIR_MAX) : gct * 0.8;
+    return gct + air;
   });
+  const avgStrideTime = rawStrideTimes.reduce((a, b) => a + b, 0) / (rawStrideTimes.length || 1);
 
-  const smoothWin = Math.max(3, Math.round(fps / 8));
-  const hipVelPx: number[] = new Array(hipX.length).fill(0);
-  for (let i = smoothWin; i < hipX.length - smoothWin; i++) {
-    hipVelPx[i] = Math.abs(hipX[i + smoothWin] - hipX[i - smoothWin]) / (2 * smoothWin);
-  }
-  // Fill edges
-  for (let i = 0; i < smoothWin; i++) hipVelPx[i] = hipVelPx[smoothWin];
-  for (let i = hipX.length - smoothWin; i < hipX.length; i++) hipVelPx[i] = hipVelPx[hipX.length - smoothWin - 1];
-
-  const avgHipVelPx = hipVelPx.reduce((a, b) => a + b, 0) / hipVelPx.length || 1;
-  // Scale factor: pixels/frame → m/s
-  const pxPerFrameToMs = avgSpeed_ms / avgHipVelPx;
-
+  // ── Pass 2: build step data using timing-based speed ─────────────────────
   const steps: StepData[] = [];
 
   for (let i = 0; i < contacts.length; i++) {
     const c = contacts[i];
     const next = i + 1 < contacts.length ? contacts[i + 1] : null;
 
-    const gctRaw    = c.duration / fps;
-    const gct       = clamp(gctRaw, GCT_MIN, GCT_MAX);
+    const gct         = clamp(c.duration / fps, GCT_MIN, GCT_MAX);
     const toeOffFrame = c.start + c.duration;
+    const airTime     = next ? clamp((next.start - toeOffFrame) / fps, AIR_MIN, AIR_MAX) : gct * 0.8;
+    const sameFoot    = contacts.slice(i + 2).find(ct => ct.foot === c.foot);
+    const swingTime   = clamp(sameFoot ? (sameFoot.start - toeOffFrame) / fps : airTime * 2, 0.1, 0.8);
+    const strideTime  = gct + airTime;
+    const stepFreq    = clamp(1 / strideTime, 2.0, 6.5);
 
-    const airRaw    = next ? (next.start - toeOffFrame) / fps : gct * 0.8;
-    const airTime   = clamp(airRaw, AIR_MIN, AIR_MAX);
+    // Per-step speed: anchored to real avg, varied by relative stride time
+    // Shorter stride time = faster step. Cap variation at ±50% of avg.
+    const speedRatio      = clamp(avgStrideTime / strideTime, 0.5, 1.5);
+    const instantSpeed_ms = clamp(avgSpeed_ms * speedRatio, 0.5, 14.0);
 
-    const sameFoot  = contacts.slice(i + 2).find(ct => ct.foot === c.foot);
-    const swingRaw  = sameFoot ? (sameFoot.start - toeOffFrame) / fps : airTime * 2;
-    const swingTime = clamp(swingRaw, 0.1, 0.8);
-
-    const strideTime = gct + airTime;
-    const stepFreq   = clamp(1 / strideTime, 2.0, 6.5);
-
-    // Per-step instant speed: use hip velocity at this frame, scaled to real m/s
-    const frameVelPx    = hipVelPx[c.start] ?? avgHipVelPx;
-    const instantSpeed_ms = clamp(frameVelPx * pxPerFrameToMs, 0.5, 15.0);
-
-    // Step length from real per-step speed + stride time
-    // v = step_length × step_freq  →  step_length = v / step_freq
+    // Step length = v / stepFreq  (v = step_length × step_freq)
     const stepLength = clamp(instantSpeed_ms / stepFreq, 0.4, 2.8);
 
-    // GRF: Morin et al. — only needs GCT and air time, no pixel calibration
-    // peak_GRF = (π/2) × BW × (GCT + airTime) / GCT
+    // GRF: Morin et al.
     const peakGRF_N  = (Math.PI / 2) * BW * (strideTime / gct);
     const peakGRF_BW = peakGRF_N / BW;
 
-    // Hip vertical displacement (still uses pixels — for relative comparison only)
+    // Hip vertical displacement (pixels, relative only)
     const hipY = c.foot === 'Left' ? leftHipY : rightHipY;
     const slice = hipY.slice(c.start, toeOffFrame);
     const hipDisp = slice.length && pixelsPerMeter > 0
-      ? (Math.max(...slice) - Math.min(...slice)) / pixelsPerMeter
-      : 0;
+      ? (Math.max(...slice) - Math.min(...slice)) / pixelsPerMeter : 0;
 
-    // Trunk lean → drive index
-    const angles = poses[c.start]?.keypoints.length ? getJointAngles(poses[c.start]) : null;
-    const driveIndex = angles ? Math.max(0.5, Math.min(2.5, 1 + angles.trunkLean / 45)) : 1.0;
-
-    const instantSpeed_mph = instantSpeed_ms * 2.23694;
+    const angles    = poses[c.start]?.keypoints.length ? getJointAngles(poses[c.start]) : null;
+    const driveIndex = angles ? clamp(1 + angles.trunkLean / 45, 0.5, 2.5) : 1.0;
 
     steps.push({
       stepNum: i + 1,
       foot: c.foot,
       groundContactTime: Math.round(gct * 1000) / 1000,
-      swingTime: Math.round(swingTime * 1000) / 1000,
-      airTime: Math.round(airTime * 1000) / 1000,
-      stepLength: Math.round(stepLength * 100) / 100,
-      stepFrequency: Math.round(stepFreq * 100) / 100,
-      driveIndex: Math.round(driveIndex * 100) / 100,
-      hipDisplacement: Math.round(hipDisp * 100) / 100,
-      peakGRF_BW: Math.round(peakGRF_BW * 100) / 100,
-      forceNewtons: Math.round(peakGRF_N),
-      frameIndex: c.start,
+      swingTime:         Math.round(swingTime * 1000) / 1000,
+      airTime:           Math.round(airTime * 1000) / 1000,
+      stepLength:        Math.round(stepLength * 100) / 100,
+      stepFrequency:     Math.round(stepFreq * 100) / 100,
+      driveIndex:        Math.round(driveIndex * 100) / 100,
+      hipDisplacement:   Math.round(hipDisp * 100) / 100,
+      peakGRF_BW:        Math.round(peakGRF_BW * 100) / 100,
+      forceNewtons:      Math.round(peakGRF_N),
+      frameIndex:        c.start,
       toeOffFrame,
-      instantSpeed_mph: Math.round(instantSpeed_mph * 10) / 10,
+      instantSpeed_mph:  Math.round(instantSpeed_ms * 2.23694 * 10) / 10,
     });
   }
 
@@ -255,7 +236,9 @@ export function computeRunMetrics(
   const startForce_N   = earlySteps.length ? Math.max(...earlySteps.map(s => s.forceNewtons)) : BW * 2.5;
   const startForce_lbs = Math.round(startForce_N * 0.224809);
 
-  const peakAccel = accelCurve.length ? Math.max(...accelCurve.map(a => Math.abs(a.a))) : 0;
+  // Human acceleration limit: ~10 m/s² (elite sprinters peak ~8-9 m/s² out of blocks)
+  const rawPeakAccel = accelCurve.length ? Math.max(...accelCurve.map(a => Math.abs(a.a))) : 0;
+  const peakAccel = clamp(rawPeakAccel, 0, 12.0);
 
   return {
     avgStepLengthRight: Math.round(avgSL_R * 100) / 100,
