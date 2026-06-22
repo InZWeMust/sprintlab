@@ -66,28 +66,148 @@ function dist(ax: number, ay: number, bx: number, by: number) {
   return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
 }
 
-/** Snap first frame, return all detected poses with their center positions */
-export async function detectAllPosesInFrame(
+/** Snap first frame, detect all people, draw skeletons, return image + pose centers */
+export async function getFirstFrameWithSkeletons(
   videoEl: HTMLVideoElement
-): Promise<{ cx: number; cy: number; pose: Pose }[]> {
+): Promise<{ dataUrl: string; people: { cx: number; cy: number }[]; nativeW: number; nativeH: number }> {
   await waitForVideoMeta(videoEl);
-  const detector = await loadDetector(true); // multipose for first frame
   await seekVideo(videoEl, 0);
 
   const canvas = document.createElement('canvas');
   canvas.width = videoEl.videoWidth;
   canvas.height = videoEl.videoHeight;
-  canvas.getContext('2d')!.drawImage(videoEl, 0, 0);
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(videoEl, 0, 0);
 
-  const detected = await detector.estimatePoses(canvas);
-  return detected.map((p: any) => ({
-    cx: poseCenterX(p),
-    cy: poseCenterY(p),
-    pose: {
-      keypoints: p.keypoints.map((kp: any) => ({ x: kp.x, y: kp.y, score: kp.score, name: kp.name })),
-      score: p.score,
-    },
-  }));
+  // Try multipose detection
+  let people: { cx: number; cy: number }[] = [];
+  try {
+    const detector = await loadDetector(true);
+    const detected = await detector.estimatePoses(canvas);
+    people = detected.map((p: any) => ({ cx: poseCenterX(p), cy: poseCenterY(p) }));
+
+    // Draw all detected skeletons in dim grey
+    for (const p of detected) {
+      drawSkeletonOnCanvas(canvas, p.keypoints, '#ffffff44', 1.5);
+    }
+  } catch {
+    // Multipose failed — leave blank skeletons
+  }
+
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+    people,
+    nativeW: videoEl.videoWidth,
+    nativeH: videoEl.videoHeight,
+  };
+}
+
+/** Draw a highlighted skeleton when user selects a person */
+export function highlightPersonOnCanvas(
+  canvas: HTMLCanvasElement,
+  baseImageUrl: string,
+  clickX: number,   // in canvas display pixels
+  clickY: number,
+  people: { cx: number; cy: number }[],
+  nativeW: number,
+  nativeH: number,
+  videoEl: HTMLVideoElement
+) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const scaleX = nativeW / canvas.clientWidth;
+  const scaleY = nativeH / canvas.clientHeight;
+  const nativeClickX = clickX * scaleX;
+  const nativeClickY = clickY * scaleY;
+
+  // Redraw base
+  const img = new Image();
+  img.onload = async () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // Draw all skeletons dim
+    try {
+      const detector = await loadDetector(true);
+      const offscreen = document.createElement('canvas');
+      offscreen.width = nativeW;
+      offscreen.height = nativeH;
+      offscreen.getContext('2d')!.drawImage(videoEl, 0, 0);
+      const detected = await detector.estimatePoses(offscreen);
+
+      // Find closest person to click
+      let minD = Infinity, closestIdx = 0;
+      detected.forEach((p: any, idx: number) => {
+        const d = Math.sqrt((poseCenterX(p) - nativeClickX) ** 2 + (poseCenterY(p) - nativeClickY) ** 2);
+        if (d < minD) { minD = d; closestIdx = idx; }
+      });
+
+      // Draw all dim, selected one bright gold
+      detected.forEach((p: any, idx: number) => {
+        const color = idx === closestIdx ? '#f59e0b' : '#ffffff22';
+        const width = idx === closestIdx ? 3 : 1;
+        drawSkeletonOnCanvas(canvas, p.keypoints, color, width, nativeW, nativeH);
+      });
+
+      // Crosshair on selected
+      const sel = detected[closestIdx];
+      if (sel) {
+        const cx = poseCenterX(sel) * (canvas.width / nativeW);
+        const cy = (sel.keypoints.find((k: any) => k.name === 'nose')?.y ?? poseCenterY(sel)) * (canvas.height / nativeH);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy - 20, 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#f59e0b33';
+        ctx.fill();
+      }
+    } catch { /* ignore */ }
+  };
+  img.src = baseImageUrl;
+}
+
+const CONNECTIONS = [
+  ['left_shoulder', 'right_shoulder'],
+  ['left_shoulder', 'left_elbow'], ['left_elbow', 'left_wrist'],
+  ['right_shoulder', 'right_elbow'], ['right_elbow', 'right_wrist'],
+  ['left_shoulder', 'left_hip'], ['right_shoulder', 'right_hip'],
+  ['left_hip', 'right_hip'],
+  ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
+  ['right_hip', 'right_knee'], ['right_knee', 'right_ankle'],
+];
+
+function drawSkeletonOnCanvas(
+  canvas: HTMLCanvasElement,
+  keypoints: any[],
+  color: string,
+  lineWidth: number,
+  nativeW?: number,
+  nativeH?: number
+) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const sx = nativeW ? canvas.width / nativeW : 1;
+  const sy = nativeH ? canvas.height / nativeH : 1;
+  const kpMap = new Map(keypoints.map((kp: any) => [kp.name, kp]));
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  for (const [a, b] of CONNECTIONS) {
+    const kpA = kpMap.get(a), kpB = kpMap.get(b);
+    if (kpA && kpB && (kpA.score ?? 0) > 0.25 && (kpB.score ?? 0) > 0.25) {
+      ctx.beginPath();
+      ctx.moveTo(kpA.x * sx, kpA.y * sy);
+      ctx.lineTo(kpB.x * sx, kpB.y * sy);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = color;
+  for (const kp of keypoints) {
+    if ((kp.score ?? 0) > 0.25) {
+      ctx.beginPath();
+      ctx.arc(kp.x * sx, kp.y * sy, lineWidth + 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
 export async function detectPosesFromVideo(

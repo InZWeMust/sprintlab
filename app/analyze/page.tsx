@@ -60,52 +60,54 @@ export default function AnalyzePage() {
     setStep('select-athlete');
   };
 
-  // Grab first frame once video meta loads
+  const [detectedPeople, setDetectedPeople] = useState<{ cx: number; cy: number }[]>([]);
+  const [frameLoading, setFrameLoading] = useState(false);
+
+  // Grab first frame with skeleton overlay
   useEffect(() => {
     if (step !== 'select-athlete' || !videoUrl) return;
     const vid = videoRef.current;
     if (!vid) return;
+    setFrameLoading(true);
 
     const grab = async () => {
-      const { getFirstFrame } = await import('../../lib/poseDetection');
-      const dataUrl = await getFirstFrame(vid);
-      setFirstFrame(dataUrl);
-      setVideoNativeW(vid.videoWidth);
-      setVideoNativeH(vid.videoHeight);
+      const { getFirstFrameWithSkeletons } = await import('../../lib/poseDetection');
+      const result = await getFirstFrameWithSkeletons(vid);
+      setFirstFrame(result.dataUrl);
+      setVideoNativeW(result.nativeW);
+      setVideoNativeH(result.nativeH);
+      setDetectedPeople(result.people);
+      setFrameLoading(false);
     };
 
     if (vid.readyState >= 1) { grab(); }
     else { vid.addEventListener('loadedmetadata', grab, { once: true }); }
   }, [step, videoUrl]);
 
-  const handleCanvasTap = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasTap = useCallback(async (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = frameCanvasRef.current;
-    if (!canvas) return;
+    const vid = videoRef.current;
+    if (!canvas || !vid) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = videoNativeW / rect.width;
     const scaleY = videoNativeH / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    setAthleteAnchor({ x, y });
+    const nativeX = (e.clientX - rect.left) * scaleX;
+    const nativeY = (e.clientY - rect.top) * scaleY;
+    setAthleteAnchor({ x: nativeX, y: nativeY });
 
-    // Draw crosshair on canvas
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(px - 28, py); ctx.lineTo(px + 28, py); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(px, py - 28); ctx.lineTo(px, py + 28); ctx.stroke();
-      ctx.fillStyle = '#f59e0b22';
-      ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.fill();
-    };
-    img.src = firstFrame;
-  }, [firstFrame, videoNativeW, videoNativeH]);
+    // Find closest detected person and highlight their full skeleton
+    const { highlightPersonOnCanvas } = await import('../../lib/poseDetection');
+    highlightPersonOnCanvas(
+      canvas,
+      firstFrame,
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+      detectedPeople,
+      videoNativeW,
+      videoNativeH,
+      vid
+    );
+  }, [firstFrame, detectedPeople, videoNativeW, videoNativeH]);
 
   const startAnalysis = async () => {
     const vid = videoRef.current;
@@ -242,7 +244,14 @@ export default function AnalyzePage() {
             </div>
 
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginBottom: '1rem' }}>
-              {firstFrame ? (
+              {frameLoading && (
+                <div style={{ background: '#141414', borderRadius: '12px', height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+                  <div style={{ fontSize: '1.5rem', animation: 'spin 1s linear infinite' }}>⚡</div>
+                  <p style={{ color: '#666', fontSize: '0.8rem', margin: 0 }}>Detecting people in frame...</p>
+                  <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+                </div>
+              )}
+              {!frameLoading && firstFrame ? (
                 <canvas
                   ref={el => {
                     (frameCanvasRef as any).current = el;
@@ -263,11 +272,11 @@ export default function AnalyzePage() {
                     borderRadius: '12px',
                   }}
                 />
-              ) : (
+              ) : !frameLoading ? (
                 <div style={{ background: '#141414', borderRadius: '12px', height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: '#555' }}>Loading first frame...</p>
+                  <p style={{ color: '#555' }}>Upload a video first</p>
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
