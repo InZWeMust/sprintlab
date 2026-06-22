@@ -106,7 +106,7 @@ export async function getFirstFrameWithSkeletons(
 export function highlightPersonOnCanvas(
   canvas: HTMLCanvasElement,
   baseImageUrl: string,
-  clickX: number,   // in canvas display pixels
+  clickX: number,
   clickY: number,
   people: { cx: number; cy: number }[],
   nativeW: number,
@@ -121,12 +121,10 @@ export function highlightPersonOnCanvas(
   const nativeClickX = clickX * scaleX;
   const nativeClickY = clickY * scaleY;
 
-  // Redraw base
   const img = new Image();
   img.onload = async () => {
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // Draw all skeletons dim
     try {
       const detector = await loadDetector(true);
       const offscreen = document.createElement('canvas');
@@ -135,30 +133,67 @@ export function highlightPersonOnCanvas(
       offscreen.getContext('2d')!.drawImage(videoEl, 0, 0);
       const detected = await detector.estimatePoses(offscreen);
 
-      // Find closest person to click
       let minD = Infinity, closestIdx = 0;
       detected.forEach((p: any, idx: number) => {
         const d = Math.sqrt((poseCenterX(p) - nativeClickX) ** 2 + (poseCenterY(p) - nativeClickY) ** 2);
         if (d < minD) { minD = d; closestIdx = idx; }
       });
 
-      // Draw all dim, selected one bright gold
+      // Draw all others very dim (blurred overlay)
       detected.forEach((p: any, idx: number) => {
-        const color = idx === closestIdx ? '#f59e0b' : '#ffffff22';
-        const width = idx === closestIdx ? 3 : 1;
-        drawSkeletonOnCanvas(canvas, p.keypoints, color, width, nativeW, nativeH);
+        if (idx !== closestIdx) {
+          drawSkeletonOnCanvas(canvas, p.keypoints, '#ffffff18', 1, nativeW, nativeH);
+        }
       });
 
-      // Crosshair on selected
+      // Draw selected person: thick bright skeleton + bounding box + label
       const sel = detected[closestIdx];
       if (sel) {
-        const cx = poseCenterX(sel) * (canvas.width / nativeW);
-        const cy = (sel.keypoints.find((k: any) => k.name === 'nose')?.y ?? poseCenterY(sel)) * (canvas.height / nativeH);
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy - 20, 14, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = '#f59e0b33';
-        ctx.fill();
+        const sx = canvas.width / nativeW;
+        const sy = canvas.height / nativeH;
+
+        // Compute bounding box from keypoints
+        const validKps = sel.keypoints.filter((k: any) => (k.score ?? 0) > 0.25);
+        if (validKps.length > 2) {
+          const xs = validKps.map((k: any) => k.x * sx);
+          const ys = validKps.map((k: any) => k.y * sy);
+          const bx = Math.min(...xs) - 16;
+          const by = Math.min(...ys) - 40;
+          const bw = Math.max(...xs) - Math.min(...xs) + 32;
+          const bh = Math.max(...ys) - Math.min(...ys) + 32;
+
+          // Glow background box
+          ctx.save();
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 20;
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([8, 4]);
+          ctx.strokeRect(bx, by + 24, bw, bh);
+          ctx.setLineDash([]);
+          ctx.restore();
+
+          // "YOUR ATHLETE" label badge
+          const labelX = bx + bw / 2;
+          const labelY = by + 20;
+          ctx.save();
+          ctx.font = 'bold 13px sans-serif';
+          ctx.textAlign = 'center';
+          const labelW = ctx.measureText('✓ YOUR ATHLETE').width + 20;
+          ctx.fillStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.roundRect(labelX - labelW / 2, labelY - 16, labelW, 22, 6);
+          ctx.fill();
+          ctx.fillStyle = '#000';
+          ctx.fillText('✓ YOUR ATHLETE', labelX, labelY);
+          ctx.restore();
+        }
+
+        // Thick gold skeleton on top
+        drawSkeletonOnCanvas(canvas, sel.keypoints, '#f59e0b', 4, nativeW, nativeH);
+
+        // White dot joints
+        drawSkeletonOnCanvas(canvas, sel.keypoints, '#ffffff', 1.5, nativeW, nativeH);
       }
     } catch { /* ignore */ }
   };
