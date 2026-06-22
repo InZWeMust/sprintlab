@@ -475,10 +475,12 @@ export default function AnalyzePage() {
                     ))}
                   </div>
                 </div>
-                <input type="number"
-                  value={weightUnit === 'lbs' ? weightLbs : weightKg}
+                <input
+                  type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={weightUnit === 'lbs' ? (weightLbs || '') : (weightKg || '')}
                   onChange={e => {
-                    const v = Number(e.target.value);
+                    const raw = e.target.value.replace(/\D/g, '');
+                    const v = raw === '' ? 0 : parseInt(raw, 10);
                     if (weightUnit === 'lbs') { setWeightLbs(v); setWeightKg(Math.round(lbsToKg(v))); }
                     else { setWeightKg(v); setWeightLbs(Math.round(kgToLbs(v))); }
                   }}
