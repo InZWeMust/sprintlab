@@ -267,50 +267,82 @@ export default function AnalyzePage() {
         {/* ── SELECT ATHLETE ── */}
         {step === 'select-athlete' && (
           <div>
+            {/* Big instruction banner */}
             <div style={{
-              background: athleteAnchor ? '#22c55e11' : '#f59e0b11',
-              border: `1px solid ${athleteAnchor ? '#22c55e44' : '#f59e0b44'}`,
-              borderRadius: '10px', padding: '0.75rem 1rem', marginBottom: '1rem',
+              background: athleteAnchor ? '#22c55e18' : '#f59e0b18',
+              border: `2px solid ${athleteAnchor ? '#22c55e' : '#f59e0b'}`,
+              borderRadius: '12px', padding: '1rem', marginBottom: '1rem',
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
             }}>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: athleteAnchor ? '#22c55e' : '#f59e0b', fontWeight: 700 }}>
-                {athleteAnchor ? '✓ Athlete selected — tap to change' : '👇 Tap on the athlete you want to analyze'}
-              </p>
-              {!athleteAnchor && (
-                <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: '#666' }}>
-                  If the video is solo (one person), tap anywhere on the athlete. Multiple people in frame? Tap exactly on your athlete.
+              <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>{athleteAnchor ? '✅' : '👆'}</span>
+              <div>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: athleteAnchor ? '#22c55e' : '#f59e0b', fontWeight: 800 }}>
+                  {athleteAnchor ? 'Athlete locked — AI will track only them' : 'TAP ON YOUR ATHLETE IN THE IMAGE'}
                 </p>
-              )}
+                <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: '#888', lineHeight: 1.4 }}>
+                  {athleteAnchor
+                    ? 'The gold skeleton shows who will be tracked. Tap anywhere else to change selection.'
+                    : 'Multiple people in frame? Tap directly on the body of the person you want to analyze. The AI will lock onto them and ignore everyone else.'}
+                </p>
+              </div>
             </div>
+
+            {/* People count badge */}
+            {!frameLoading && detectedPeople.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: '#555' }}>
+                  {detectedPeople.length === 1
+                    ? '1 person detected in frame'
+                    : `${detectedPeople.length} people detected — tap YOUR athlete`}
+                </span>
+                {detectedPeople.length > 1 && (
+                  <span style={{ background: '#ef444422', border: '1px solid #ef444444', borderRadius: '6px', padding: '0.1rem 0.5rem', fontSize: '0.65rem', color: '#ef4444', fontWeight: 700 }}>
+                    REQUIRED: select athlete
+                  </span>
+                )}
+              </div>
+            )}
 
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', marginBottom: '1rem' }}>
               {frameLoading && (
-                <div style={{ background: '#141414', borderRadius: '12px', height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+                <div style={{ background: '#141414', borderRadius: '12px', height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
                   <div style={{ fontSize: '1.5rem', animation: 'spin 1s linear infinite' }}>⚡</div>
-                  <p style={{ color: '#666', fontSize: '0.8rem', margin: 0 }}>Detecting people in frame...</p>
+                  <p style={{ color: '#f59e0b', fontSize: '0.85rem', margin: 0, fontWeight: 700 }}>Scanning for people in frame...</p>
+                  <p style={{ color: '#555', fontSize: '0.72rem', margin: 0 }}>AI detecting skeleton positions</p>
                   <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
                 </div>
               )}
               {!frameLoading && firstFrame ? (
-                <canvas
-                  ref={el => {
-                    (frameCanvasRef as any).current = el;
-                    if (el && firstFrame && !athleteAnchor) {
-                      el.width = videoNativeW;
-                      el.height = videoNativeH;
-                      const ctx = el.getContext('2d');
-                      if (ctx) {
-                        const img = new Image();
-                        img.onload = () => ctx.drawImage(img, 0, 0, el.width, el.height);
-                        img.src = firstFrame;
+                <>
+                  <canvas
+                    ref={el => {
+                      (frameCanvasRef as any).current = el;
+                      if (el && firstFrame && !athleteAnchor) {
+                        el.width = videoNativeW;
+                        el.height = videoNativeH;
+                        const ctx = el.getContext('2d');
+                        if (ctx) {
+                          const img = new Image();
+                          img.onload = () => ctx.drawImage(img, 0, 0, el.width, el.height);
+                          img.src = firstFrame;
+                        }
                       }
-                    }
-                  }}
-                  onClick={handleCanvasTap}
-                  style={{
-                    width: '100%', height: 'auto', display: 'block', cursor: 'crosshair',
-                    borderRadius: '12px',
-                  }}
-                />
+                    }}
+                    onClick={handleCanvasTap}
+                    style={{ width: '100%', height: 'auto', display: 'block', cursor: 'crosshair', borderRadius: '12px' }}
+                  />
+                  {!athleteAnchor && (
+                    <div style={{
+                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      <div style={{ background: '#000000cc', borderRadius: '12px', padding: '0.75rem 1.25rem', textAlign: 'center' }}>
+                        <p style={{ margin: 0, color: '#f59e0b', fontWeight: 800, fontSize: '1rem' }}>👆 Tap your athlete</p>
+                        <p style={{ margin: '0.25rem 0 0', color: '#888', fontSize: '0.72rem' }}>Tap directly on their body</p>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : !frameLoading ? (
                 <div style={{ background: '#141414', borderRadius: '12px', height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <p style={{ color: '#555' }}>Upload a video first</p>
@@ -319,24 +351,25 @@ export default function AnalyzePage() {
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button onClick={() => setStep('configure')} style={{
+              <button onClick={() => { setAthleteAnchor(null); setStep('configure'); }} style={{
                 flex: 1, background: '#1e1e1e', border: '1px solid #2a2a2a', borderRadius: '10px',
-                color: '#888', padding: '0.9rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                color: '#666', padding: '0.9rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem',
               }}>
-                Skip (solo video)
+                Solo video — skip
               </button>
               <button
                 onClick={() => setStep('configure')}
                 disabled={!athleteAnchor}
                 style={{
-                  flex: 2, background: athleteAnchor ? '#f59e0b' : '#2a2a2a',
-                  border: 'none', borderRadius: '10px',
-                  color: athleteAnchor ? '#000' : '#555',
+                  flex: 2, background: athleteAnchor ? '#f59e0b' : '#1e1e1e',
+                  border: `2px solid ${athleteAnchor ? '#f59e0b' : '#2a2a2a'}`, borderRadius: '10px',
+                  color: athleteAnchor ? '#000' : '#444',
                   padding: '0.9rem', cursor: athleteAnchor ? 'pointer' : 'not-allowed',
                   fontWeight: 800, fontSize: '0.9rem',
+                  transition: 'all 0.2s',
                 }}
               >
-                Confirm Athlete →
+                {athleteAnchor ? '🔒 Lock & Continue →' : 'Tap athlete first'}
               </button>
             </div>
           </div>
@@ -492,11 +525,11 @@ export default function AnalyzePage() {
               </div>
 
               <Field
-                label="Run Distance (m)"
+                label="Distance in Frame (m)"
                 value={runDistanceM.toString()}
                 onChange={v => setRunDistanceM(Number(v))}
                 type="number"
-                hint="Exact distance filmed — used for stride length & speed calculation"
+                hint="How far the athlete travels WITHIN the video — not total sprint distance. Side-view clips are usually 10–20m. Put a cone at each edge of frame and measure that distance."
               />
 
               <div>
