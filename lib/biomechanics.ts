@@ -146,7 +146,16 @@ export function computeRunMetrics(
     const air = next ? clamp((next.start - toeOff) / fps, AIR_MIN, AIR_MAX) : gct * 0.8;
     return gct + air;
   });
-  const avgStrideTime = rawStrideTimes.reduce((a, b) => a + b, 0) / (rawStrideTimes.length || 1);
+
+  // Use MEDIAN stride time (not mean) so outlier steps (detection gaps, step 5 etc.)
+  // don't compress all other steps' speed ratios toward 1.0
+  const sortedST = [...rawStrideTimes].sort((a, b) => a - b);
+  const medianStrideTime = sortedST.length % 2 === 0
+    ? (sortedST[sortedST.length / 2 - 1] + sortedST[sortedST.length / 2]) / 2
+    : sortedST[Math.floor(sortedST.length / 2)];
+
+  // Flag steps whose stride time is >1.8× the median — likely a detection gap, not a real slow step
+  const outlierThreshold = medianStrideTime * 1.8;
 
   // ── Pass 2: build step data using timing-based speed ─────────────────────
   const steps: StepData[] = [];
@@ -163,9 +172,11 @@ export function computeRunMetrics(
     const strideTime  = gct + airTime;
     const stepFreq    = clamp(1 / strideTime, 2.0, 6.5);
 
-    // Per-step speed: anchored to real avg, varied by relative stride time
-    // Shorter stride time = faster step. Cap variation at ±50% of avg.
-    const speedRatio      = clamp(avgStrideTime / strideTime, 0.5, 1.5);
+    // Per-step speed: anchored to real avg, varied by relative stride time.
+    // Use median stride time as reference so outlier steps don't collapse all ratios.
+    // Outlier steps (detection gaps) get assigned avg speed rather than a fake slow value.
+    const isOutlier = strideTime > outlierThreshold;
+    const speedRatio      = isOutlier ? 1.0 : clamp(medianStrideTime / strideTime, 0.5, 1.5);
     const instantSpeed_ms = clamp(avgSpeed_ms * speedRatio, 0.5, 14.0);
 
     // Step length = v / stepFreq  (v = step_length × step_freq)

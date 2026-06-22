@@ -274,14 +274,14 @@ function ChartsTab({ m }: { m: RunMetrics }) {
         <p style={{ margin: '0 0 0.75rem', fontSize: '0.75rem', color: '#888', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Speed Formula Verification
         </p>
-        <p style={{ margin: 0, fontSize: '0.8rem', color: '#555' }}>v = frequency × stride length</p>
+        <p style={{ margin: 0, fontSize: '0.8rem', color: '#555' }}>v = step_frequency × step_length</p>
         <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {m.steps.slice(0, 5).map((s, i) => {
-            const calc = s.stepFrequency * s.stepLength * 2;
+            const calc = s.stepFrequency * s.stepLength;
             return (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
                 <span style={{ color: '#666' }}>Step {i + 1} ({s.foot})</span>
-                <span style={{ color: '#f59e0b' }}>{s.stepFrequency} Hz × {s.stepLength}m × 2 = <strong>{calc.toFixed(2)} m/s</strong></span>
+                <span style={{ color: '#f59e0b' }}>{s.stepFrequency} Hz × {s.stepLength}m = <strong>{calc.toFixed(2)} m/s</strong></span>
               </div>
             );
           })}
