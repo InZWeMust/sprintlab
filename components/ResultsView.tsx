@@ -142,22 +142,32 @@ function GCTBar({ label, value, max, color }: { label: string; value: number; ma
 
 function SummaryTab({ m }: { m: RunMetrics }) {
   const rows = [
-    ['Run Distance', '20 m'],
+    ['Total Steps', `${m.totalSteps}`],
+    ['Run Time', `${m.runTime} s`],
+    ['─── SPEED ───', ''],
+    ['Avg Speed', `${m.avgSpeed_mph} mph  (${m.avgSpeed_ms} m/s)`],
+    ['Max Speed', `${m.maxSpeed_mph} mph  (${m.maxSpeed_ms} m/s)`],
+    ['Speed Formula', `${m.avgStepLength}m × ${Math.round(m.totalSteps / m.runTime * 100) / 100}Hz = ${m.avgSpeed_mph} mph ✓`],
+    ['─── STRIDE ───', ''],
     ['Avg Step Length - Right', `${m.avgStepLengthRight} m`],
     ['Avg Step Length - Left', `${m.avgStepLengthLeft} m`],
     ['Avg Step Length', `${m.avgStepLength} m`],
-    ['Step Frequency - Right', `${m.avgFreqRight} Hz`],
-    ['Step Frequency - Left', `${m.avgFreqLeft} Hz`],
-    ['Avg GCT - Right', `${m.avgGCT_Right} s`],
-    ['Avg GCT - Left', `${m.avgGCT_Left} s`],
-    ['Avg Air Time - Right', `${m.avgAirRight} s`],
-    ['Avg Air Time - Left', `${m.avgAirLeft} s`],
-    ['Run Time', `${m.runTime} s`],
-    ['Avg Speed', `${m.avgSpeed_ms} m/s (${m.avgSpeed_mph} mph)`],
-    ['Max Speed', `${m.maxSpeed_ms} m/s (${m.maxSpeed_mph} mph)`],
-    ['Start Force', `${m.startForce_lbs} lbs (${m.startForce_N} N)`],
-    ['Peak Acceleration', `${m.peakAccel_ms2} m/s²`],
     ['Step Asymmetry', `${m.asymmetryPct}%`],
+    ['─── FREQUENCY ───', ''],
+    ['Step Freq - Right', `${m.avgFreqRight} Hz`],
+    ['Step Freq - Left', `${m.avgFreqLeft} Hz`],
+    ['─── GROUND CONTACT ───', ''],
+    ['Avg GCT - Right', `${Math.round(m.avgGCT_Right * 1000)} ms`],
+    ['Avg GCT - Left', `${Math.round(m.avgGCT_Left * 1000)} ms`],
+    ['GCT Asymmetry', `${m.gctAsymmetryPct}%`],
+    ['─── FLIGHT / SWING ───', ''],
+    ['Air Time - Right', `${Math.round(m.avgAirRight * 1000)} ms`],
+    ['Air Time - Left', `${Math.round(m.avgAirLeft * 1000)} ms`],
+    ['Swing Time - Right', `${Math.round(m.avgSwingRight * 1000)} ms`],
+    ['Swing Time - Left', `${Math.round(m.avgSwingLeft * 1000)} ms`],
+    ['─── FORCE ───', ''],
+    ['Start Force', `${m.startForce_lbs} lbs  (${m.startForce_N} N)`],
+    ['Peak Acceleration', `${m.peakAccel_ms2} m/s²`],
   ];
 
   return (
@@ -166,16 +176,20 @@ function SummaryTab({ m }: { m: RunMetrics }) {
         <span style={{ fontSize: '0.75rem', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Metric</span>
         <span style={{ fontSize: '0.75rem', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Value</span>
       </div>
-      {rows.map(([k, v], i) => (
-        <div key={k} style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '0.65rem 1rem', borderBottom: i < rows.length - 1 ? '1px solid #1e1e1e' : 'none',
-          background: i % 2 === 0 ? '#141414' : '#161616',
-        }}>
-          <span style={{ fontSize: '0.8rem', color: '#aaa' }}>{k}</span>
-          <span style={{ fontSize: '0.8rem', color: '#f59e0b', fontWeight: 700 }}>{v}</span>
-        </div>
-      ))}
+      {rows.map(([k, v], i) => {
+        const isHeader = k.startsWith('───');
+        return (
+          <div key={i} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: isHeader ? '0.4rem 1rem' : '0.65rem 1rem',
+            borderBottom: i < rows.length - 1 ? '1px solid #1a1a1a' : 'none',
+            background: isHeader ? '#111' : i % 2 === 0 ? '#141414' : '#161616',
+          }}>
+            <span style={{ fontSize: isHeader ? '0.65rem' : '0.8rem', color: isHeader ? '#444' : '#aaa', letterSpacing: isHeader ? '0.1em' : 0 }}>{k}</span>
+            {!isHeader && <span style={{ fontSize: '0.8rem', color: '#f59e0b', fontWeight: 700 }}>{v}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -282,31 +296,40 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 function StepsTab({ m }: { m: RunMetrics }) {
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-        <thead>
-          <tr style={{ background: '#1e1e1e' }}>
-            {['Step', 'Foot', 'GCT(s)', 'Air(s)', 'Len(m)', 'Freq(Hz)', 'GRF(BW)', 'Drive', 'Hip(m)'].map(h => (
-              <th key={h} style={{ padding: '0.6rem 0.5rem', color: '#888', fontWeight: 700, textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {m.steps.map((s, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid #1a1a1a', background: i % 2 === 0 ? '#141414' : '#161616' }}>
-              <td style={{ padding: '0.5rem', color: '#888' }}>{s.stepNum}</td>
-              <td style={{ padding: '0.5rem', color: s.foot === 'Right' ? '#f59e0b' : '#3b82f6', fontWeight: 700 }}>{s.foot[0]}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.groundContactTime}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.airTime}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.stepLength}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.stepFrequency}</td>
-              <td style={{ padding: '0.5rem', color: s.peakGRF_BW > 3 ? '#ef4444' : '#22c55e', fontWeight: 700 }}>{s.peakGRF_BW}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.driveIndex}</td>
-              <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.hipDisplacement}</td>
+    <div>
+      {/* Gait cycle explainer */}
+      <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: '10px', padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.72rem', color: '#555' }}>
+        <span style={{ color: '#f59e0b' }}>GCT</span> = touchdown→toe-off &nbsp;·&nbsp;
+        <span style={{ color: '#22c55e' }}>Swing</span> = toe-off→next same-foot TD &nbsp;·&nbsp;
+        <span style={{ color: '#3b82f6' }}>Air</span> = toe-off→opposite foot TD &nbsp;·&nbsp;
+        <span style={{ color: '#888' }}>Elite GCT floor: 75ms</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem' }}>
+          <thead>
+            <tr style={{ background: '#1e1e1e' }}>
+              {['#', 'Foot', 'GCT ms', 'Swing ms', 'Air ms', 'Len m', 'Hz', 'mph', 'GRF×BW'].map(h => (
+                <th key={h} style={{ padding: '0.6rem 0.5rem', color: '#888', fontWeight: 700, textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {m.steps.map((s, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #1a1a1a', background: i % 2 === 0 ? '#141414' : '#161616' }}>
+                <td style={{ padding: '0.5rem', color: '#555' }}>{s.stepNum}</td>
+                <td style={{ padding: '0.5rem', color: s.foot === 'Right' ? '#f59e0b' : '#3b82f6', fontWeight: 700 }}>{s.foot[0]}</td>
+                <td style={{ padding: '0.5rem', color: '#f59e0b', fontWeight: 600 }}>{Math.round(s.groundContactTime * 1000)}</td>
+                <td style={{ padding: '0.5rem', color: '#22c55e' }}>{Math.round(s.swingTime * 1000)}</td>
+                <td style={{ padding: '0.5rem', color: '#3b82f6' }}>{Math.round(s.airTime * 1000)}</td>
+                <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.stepLength}</td>
+                <td style={{ padding: '0.5rem', color: '#f0f0f0' }}>{s.stepFrequency}</td>
+                <td style={{ padding: '0.5rem', color: '#f0f0f0', fontWeight: 600 }}>{s.instantSpeed_mph}</td>
+                <td style={{ padding: '0.5rem', color: s.peakGRF_BW > 4 ? '#ef4444' : s.peakGRF_BW > 3 ? '#f59e0b' : '#22c55e', fontWeight: 700 }}>{s.peakGRF_BW}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
