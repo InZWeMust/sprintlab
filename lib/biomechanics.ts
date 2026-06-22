@@ -175,8 +175,11 @@ export function computeRunMetrics(
     // Per-step speed: anchored to real avg, varied by relative stride time.
     // Use median stride time as reference so outlier steps don't collapse all ratios.
     // Outlier steps (detection gaps) get assigned avg speed rather than a fake slow value.
+    // ±25% max variation from avg — matches real sprint physics.
+    // Bolt's max/avg ratio on 9.58s world record was 1.19× — so 1.25 is generous.
+    // Outlier steps (detection gaps) get avg speed.
     const isOutlier = strideTime > outlierThreshold;
-    const speedRatio      = isOutlier ? 1.0 : clamp(medianStrideTime / strideTime, 0.5, 1.5);
+    const speedRatio      = isOutlier ? 1.0 : clamp(medianStrideTime / strideTime, 0.75, 1.25);
     const instantSpeed_ms = clamp(avgSpeed_ms * speedRatio, 0.5, 14.0);
 
     // Step length = v / stepFreq  (v = step_length × step_freq)
