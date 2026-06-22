@@ -185,8 +185,10 @@ export function computeRunMetrics(
     // Step length = v / stepFreq  (v = step_length × step_freq)
     const stepLength = clamp(instantSpeed_ms / stepFreq, 0.4, 2.8);
 
-    // GRF: Morin et al.
-    const peakGRF_N  = (Math.PI / 2) * BW * (strideTime / gct);
+    // GRF: Morin et al. — cap at 6× BW (elite sprinters peak ~3.5–5× BW).
+    // Outlier steps with detection gaps produce huge fake strideTime → huge fake GRF.
+    const rawGRF_N   = (Math.PI / 2) * BW * ((isOutlier ? medianStrideTime : strideTime) / gct);
+    const peakGRF_N  = Math.min(rawGRF_N, BW * 6);
     const peakGRF_BW = peakGRF_N / BW;
 
     // Hip vertical displacement (pixels, relative only)

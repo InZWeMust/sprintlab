@@ -51,9 +51,11 @@ export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom'
             label="GC TIME" value={`${Math.round(((m.avgGCT_Left + m.avgGCT_Right) / 2) * 1000)}`} unit="ms" color="#3b82f6"
             flag={flagMetric(Math.round(((m.avgGCT_Left + m.avgGCT_Right) / 2) * 1000), preset.expectedGCT_ms)}
           />
-          <HudStat
-            label="START FORCE" value={`${m.startForce_lbs}`} unit="LBS" color="#ef4444"
-          />
+          {runType === 'fly' ? (
+            <HudStat label="PEAK GRF" value={`${Math.round(Math.max(...m.steps.map(s => s.peakGRF_BW)) * 10) / 10}`} unit="× BW" color="#ef4444" />
+          ) : (
+            <HudStat label="START FORCE" value={`${m.startForce_lbs}`} unit="LBS" color="#ef4444" />
+          )}
         </div>
       </div>
 
@@ -61,7 +63,7 @@ export default function ResultsView({ metrics: m, kinogramUrls, sport = 'custom'
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
         <StatCard label="Avg Speed" value={`${m.avgSpeed_mph} mph`} sub={`${m.avgSpeed_ms} m/s`} />
         <StatCard label="Max Speed" value={`${m.maxSpeed_mph} mph`} sub={`${m.maxSpeed_ms} m/s`} color="#22c55e" />
-        <StatCard label="Start Force" value={`${m.startForce_lbs} lbs`} sub={`${m.startForce_N} N`} color="#ef4444" />
+        {runType !== 'fly' && <StatCard label="Start Force" value={`${m.startForce_lbs} lbs`} sub={`${m.startForce_N} N`} color="#ef4444" />}
         <StatCard label="Peak Accel" value={`${m.peakAccel_ms2} m/s²`} sub="from speed curve" />
         <StatCard label="Avg Step Len" value={`${m.avgStepLength} m`} sub={`R: ${m.avgStepLengthRight}m · L: ${m.avgStepLengthLeft}m`} />
         <StatCard label="Asymmetry" value={`${m.asymmetryPct}%`} sub="step length L vs R"
